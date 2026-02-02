@@ -10,6 +10,8 @@ defmodule Absinthe.GraphqlWS.Socket do
     Defaults to `30_000` (30 seconds).
   * `pipeline` - optional - A `{module, function}` tuple defining how to generate an Absinthe pipeline
     for each incoming message. Defaults to `{Absinthe.GraphqlWS.Socket, :absinthe_pipeline}`.
+  * `gc_interval` - optional - Interval in milliseconds to run `:erlang.garbage_collect/0` on the socket
+    process. Disabled by default. See "Garbage Collection" section below.
 
   ## Pipeline modification
 
@@ -19,6 +21,19 @@ defmodule Absinthe.GraphqlWS.Socket do
 
   If an alternate pipeline function is provided, it must accept the arguments `schema` and `options`. These
   options include the current context and any variables that are included with the requested query.
+
+  ## Garbage Collection
+
+  In some workloads, the socket process responsible for handling subscriptions may accumulate
+  garbage that is not being collected by the Erlang VM. A workaround for this is to instruct
+  the process to periodically tell the VM to collect its garbage. This can be done by setting
+  the `gc_interval` option:
+
+      defmodule MyAppWeb.GraphqlSocket do
+        use Absinthe.GraphqlWS.Socket,
+          schema: MyAppWeb.Schema,
+          gc_interval: 10_000
+      end
 
   ## Example
 
@@ -41,6 +56,7 @@ defmodule Absinthe.GraphqlWS.Socket do
     :absinthe,
     :connect_info,
     :endpoint,
+    :gc_interval,
     :handler,
     :keepalive,
     :pubsub,
@@ -57,6 +73,7 @@ defmodule Absinthe.GraphqlWS.Socket do
           assigns: map(),
           connect_info: map(),
           endpoint: module(),
+          gc_interval: integer() | nil,
           initialized?: boolean(),
           keepalive: integer(),
           subscriptions: map()
@@ -227,6 +244,9 @@ defmodule Absinthe.GraphqlWS.Socket do
         if socket.keepalive > 0,
           do: Process.send_after(self(), :keepalive, socket.keepalive)
 
+        if socket.gc_interval,
+          do: Process.send_after(self(), :gc, socket.gc_interval)
+
         {:ok, socket}
       end
 
@@ -276,6 +296,7 @@ defmodule Absinthe.GraphqlWS.Socket do
     pubsub = socket.endpoint.config(:pubsub_server)
     schema = Keyword.fetch!(options, :schema)
     keepalive = Keyword.get(options, :keepalive, @default_keepalive)
+    gc_interval = Keyword.get(options, :gc_interval)
 
     absinthe_config = %{
       opts: [
@@ -292,6 +313,7 @@ defmodule Absinthe.GraphqlWS.Socket do
         absinthe: absinthe_config,
         connect_info: socket.connect_info,
         endpoint: socket.endpoint,
+        gc_interval: gc_interval,
         handler: module,
         keepalive: keepalive,
         pubsub: pubsub

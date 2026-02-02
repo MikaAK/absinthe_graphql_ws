@@ -83,6 +83,12 @@ defmodule Absinthe.GraphqlWS.Transport do
     {:push, {:ping, @ping}, socket}
   end
 
+  def handle_info(:gc, socket) do
+    :erlang.garbage_collect()
+    Process.send_after(self(), :gc, socket.gc_interval)
+    {:ok, socket}
+  end
+
   def handle_info(%Broadcast{event: "subscription:data", payload: payload, topic: topic}, socket) do
     subscription_id = socket.subscriptions[topic]
     {:push, {:text, Message.Next.new(subscription_id, payload.result)}, socket}
